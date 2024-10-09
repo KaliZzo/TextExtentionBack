@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Real-Time Audio Transcription",
+  "version": "1.0",
+  "description": "Transcribes system audio in real-time using Deepgram",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["https://api.deepgram.com/"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
