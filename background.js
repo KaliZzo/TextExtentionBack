@@ -1,6 +1,5 @@
-let deepgramSocket = null;
-
-const DEEPGRAM_API_KEY = "663b37adb682cef7e0e49dab4b42ced3f1e6e319";
+let whisperAPIKey = "";
+let isRecording = false;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "startCapture") {
@@ -16,6 +15,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 async function startCapture() {
   console.log("Starting capture...");
+  isRecording = true;
   try {
     const [tab] = await chrome.tabs.query({
       active: true,
@@ -25,7 +25,6 @@ async function startCapture() {
       target: { tabId: tab.id },
       files: ["contentScript.js"],
     });
-    setupDeepgramConnection();
     return { success: true };
   } catch (error) {
     console.error("Error in startCapture:", error);
@@ -33,53 +32,15 @@ async function startCapture() {
   }
 }
 
-async function setupDeepgramConnection() {
-  const deepgramUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=48000&channels=1`;
-
-  deepgramSocket = new WebSocket(deepgramUrl);
-
-  deepgramSocket.onopen = () => {
-    console.log("Deepgram WebSocket connection opened");
-    deepgramSocket.send(JSON.stringify({ authorization: DEEPGRAM_API_KEY }));
-  };
-
-  deepgramSocket.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (
-      data.channel &&
-      data.channel.alternatives &&
-      data.channel.alternatives[0]
-    ) {
-      const transcript = data.channel.alternatives[0].transcript;
-      if (transcript) {
-        chrome.runtime.sendMessage({
-          action: "transcription",
-          text: transcript,
-        });
-      }
-    }
-  };
-
-  deepgramSocket.onerror = (error) => {
-    console.error("Deepgram WebSocket error:", error);
-  };
-
-  deepgramSocket.onclose = () => {
-    console.log("Deepgram WebSocket connection closed");
-  };
-}
-
 function handleAudioData(audioData) {
-  if (deepgramSocket && deepgramSocket.readyState === WebSocket.OPEN) {
-    deepgramSocket.send(audioData);
+  if (isRecording) {
+    sendAudioToWhisper(audioData);
   }
 }
 
 async function stopCapture() {
-  if (deepgramSocket) {
-    deepgramSocket.close();
-    deepgramSocket = null;
-  }
+  console.log("Stopping capture...");
+  isRecording = false;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
@@ -88,4 +49,48 @@ async function stopCapture() {
     },
   });
   return { success: true };
+}
+
+async function sendAudioToWhisper(audioData) {
+  console.log("Sending audio to Whisper API...");
+
+  const audioBlob = new Blob([new Uint8Array(audioData)], {
+    type: "audio/wav",
+  });
+
+  const formData = new FormData();
+  formData.append("file", audioBlob, "audio.wav");
+  formData.append("model", "whisper-1");
+
+  try {
+    const response = await fetch(
+      "https://api.openai.com/v1/audio/transcriptions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${whisperAPIKey}`,
+        },
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `HTTP error! status: ${response.status}, message: ${errorText}`
+      );
+    }
+
+    const result = await response.json();
+    console.log("Transcription result:", result);
+
+    if (result.text) {
+      chrome.runtime.sendMessage({
+        action: "transcription",
+        text: result.text,
+      });
+    }
+  } catch (error) {
+    console.error("Error sending audio to Whisper:", error);
+  }
 }

@@ -1,53 +1,98 @@
 let audioContext;
-let mediaStreamSource;
-let scriptProcessor;
+let audioChunks = [];
 
 function startAudioCapture() {
-  audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
   navigator.mediaDevices
-    .getUserMedia({ audio: true, video: false })
+    .getUserMedia({ audio: true })
     .then((stream) => {
-      mediaStreamSource = audioContext.createMediaStreamSource(stream);
-      scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(1024, 1, 1);
 
-      mediaStreamSource.connect(scriptProcessor);
-      scriptProcessor.connect(audioContext.destination);
+      source.connect(processor);
+      processor.connect(audioContext.destination);
 
-      scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-        const inputBuffer = audioProcessingEvent.inputBuffer;
-        const inputData = inputBuffer.getChannelData(0);
+      processor.onaudioprocess = (e) => {
+        const audioData = e.inputBuffer.getChannelData(0);
+        audioChunks.push(new Float32Array(audioData));
 
-        // Convert Float32Array to Int16Array
-        const int16Array = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          int16Array[i] = Math.max(
-            -32768,
-            Math.min(32767, Math.floor(inputData[i] * 32768))
-          );
+        // Send audio data every second (adjust as needed)
+        if (audioChunks.length >= 44) {
+          // ~1 second of audio at 44.1kHz
+          const audioBlob = exportWAV(audioChunks);
+          audioBlob.arrayBuffer().then((buffer) => {
+            chrome.runtime.sendMessage({
+              action: "audioData",
+              data: Array.from(new Uint8Array(buffer)),
+            });
+          });
+          audioChunks = [];
         }
-
-        chrome.runtime.sendMessage({
-          action: "audioData",
-          data: int16Array.buffer,
-        });
       };
     })
     .catch((error) => console.error("Error accessing microphone:", error));
 }
 
+function exportWAV(audioChunks) {
+  const wavBuffer = createWavBuffer(audioChunks);
+  return new Blob([wavBuffer], { type: "audio/wav" });
+}
+
+function createWavBuffer(audioChunks) {
+  const numChannels = 1;
+  const sampleRate = 44100;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const blockAlign = numChannels * bytesPerSample;
+
+  let numSamples = 0;
+  for (let i = 0; i < audioChunks.length; i++) {
+    numSamples += audioChunks[i].length;
+  }
+
+  const wavBuffer = new ArrayBuffer(44 + numSamples * bytesPerSample);
+  const view = new DataView(wavBuffer);
+
+  // WAV Header
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + numSamples * bytesPerSample, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, numSamples * bytesPerSample, true);
+
+  let offset = 44;
+  for (let i = 0; i < audioChunks.length; i++) {
+    for (let j = 0; j < audioChunks[i].length; j++) {
+      const sample = Math.max(-1, Math.min(1, audioChunks[i][j]));
+      view.setInt16(
+        offset,
+        sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+        true
+      );
+      offset += 2;
+    }
+  }
+
+  return wavBuffer;
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
 function stopAudioCapture() {
-  if (scriptProcessor) {
-    scriptProcessor.disconnect();
-    scriptProcessor = null;
-  }
-  if (mediaStreamSource) {
-    mediaStreamSource.disconnect();
-    mediaStreamSource = null;
-  }
   if (audioContext) {
     audioContext.close();
-    audioContext = null;
   }
 }
 
