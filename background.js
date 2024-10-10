@@ -1,5 +1,4 @@
-let whisperAPIKey =
-  "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";
+let whisperAPIKey = "";
 let isRecording = false;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
