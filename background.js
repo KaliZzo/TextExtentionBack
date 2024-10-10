@@ -1,4 +1,5 @@
-let whisperAPIKey = "";
+let whisperAPIKey =
+  "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";
 let isRecording = false;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -21,10 +22,7 @@ async function startCapture() {
       active: true,
       currentWindow: true,
     });
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["contentScript.js"],
-    });
+    await chrome.tabs.sendMessage(tab.id, { action: "startCapture" });
     return { success: true };
   } catch (error) {
     console.error("Error in startCapture:", error);
@@ -32,23 +30,26 @@ async function startCapture() {
   }
 }
 
+async function stopCapture() {
+  console.log("Stopping capture...");
+  isRecording = false;
+  try {
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    await chrome.tabs.sendMessage(tab.id, { action: "stopCapture" });
+    return { success: true };
+  } catch (error) {
+    console.error("Error in stopCapture:", error);
+    return { error: "Error in stopCapture: " + error.message };
+  }
+}
+
 function handleAudioData(audioData) {
   if (isRecording) {
     sendAudioToWhisper(audioData);
   }
-}
-
-async function stopCapture() {
-  console.log("Stopping capture...");
-  isRecording = false;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    function: () => {
-      window.postMessage({ type: "STOP_CAPTURE" }, "*");
-    },
-  });
-  return { success: true };
 }
 
 async function sendAudioToWhisper(audioData) {
@@ -61,6 +62,7 @@ async function sendAudioToWhisper(audioData) {
   const formData = new FormData();
   formData.append("file", audioBlob, "audio.wav");
   formData.append("model", "whisper-1");
+  formData.append("language", "en");
 
   try {
     const response = await fetch(
@@ -94,3 +96,5 @@ async function sendAudioToWhisper(audioData) {
     console.error("Error sending audio to Whisper:", error);
   }
 }
+
+console.log("Background script loaded");

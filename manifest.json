@@ -3,7 +3,7 @@
   "name": "Real-Time Audio Transcription",
   "version": "1.0",
   "description": "Transcribes audio in near real-time using OpenAI's Whisper API",
-  "permissions": ["activeTab", "storage", "scripting", "microphone"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["https://api.openai.com/"],
   "background": {
     "service_worker": "background.js"

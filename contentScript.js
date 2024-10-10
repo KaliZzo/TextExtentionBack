@@ -1,36 +1,45 @@
 let audioContext;
+let audioSource;
+let processor;
 let audioChunks = [];
 
 function startAudioCapture() {
-  navigator.mediaDevices
-    .getUserMedia({ audio: true })
-    .then((stream) => {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(1024, 1, 1);
+  const videos = document.getElementsByTagName('video');
+  const audios = document.getElementsByTagName('audio');
+  
+  if (videos.length > 0) {
+    captureMediaElement(videos[0]);
+  } else if (audios.length > 0) {
+    captureMediaElement(audios[0]);
+  } else {
+    console.error('No video or audio element found on the page');
+  }
+}
 
-      source.connect(processor);
-      processor.connect(audioContext.destination);
+function captureMediaElement(mediaElement) {
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  audioSource = audioContext.createMediaElementSource(mediaElement);
+  processor = audioContext.createScriptProcessor(1024, 1, 1);
 
-      processor.onaudioprocess = (e) => {
-        const audioData = e.inputBuffer.getChannelData(0);
-        audioChunks.push(new Float32Array(audioData));
+  audioSource.connect(processor);
+  processor.connect(audioContext.destination);
+  audioSource.connect(audioContext.destination);
 
-        // Send audio data every second (adjust as needed)
-        if (audioChunks.length >= 44) {
-          // ~1 second of audio at 44.1kHz
-          const audioBlob = exportWAV(audioChunks);
-          audioBlob.arrayBuffer().then((buffer) => {
-            chrome.runtime.sendMessage({
-              action: "audioData",
-              data: Array.from(new Uint8Array(buffer)),
-            });
-          });
-          audioChunks = [];
-        }
-      };
-    })
-    .catch((error) => console.error("Error accessing microphone:", error));
+  processor.onaudioprocess = (e) => {
+    const audioData = e.inputBuffer.getChannelData(0);
+    audioChunks.push(new Float32Array(audioData));
+
+    if (audioChunks.length >= 44) {
+      const audioBlob = exportWAV(audioChunks);
+      audioBlob.arrayBuffer().then((buffer) => {
+        chrome.runtime.sendMessage({
+          action: "audioData",
+          data: Array.from(new Uint8Array(buffer)),
+        });
+      });
+      audioChunks = [];
+    }
+  };
 }
 
 function exportWAV(audioChunks) {
@@ -53,7 +62,6 @@ function createWavBuffer(audioChunks) {
   const wavBuffer = new ArrayBuffer(44 + numSamples * bytesPerSample);
   const view = new DataView(wavBuffer);
 
-  // WAV Header
   writeString(view, 0, "RIFF");
   view.setUint32(4, 36 + numSamples * bytesPerSample, true);
   writeString(view, 8, "WAVE");
@@ -91,15 +99,24 @@ function writeString(view, offset, string) {
 }
 
 function stopAudioCapture() {
+  if (processor) {
+    processor.disconnect();
+    audioSource.disconnect();
+  }
   if (audioContext) {
     audioContext.close();
   }
 }
 
-startAudioCapture();
-
-window.addEventListener("message", (event) => {
-  if (event.data.type === "STOP_CAPTURE") {
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "startCapture") {
+    startAudioCapture();
+    sendResponse({ success: true });
+  } else if (request.action === "stopCapture") {
     stopAudioCapture();
+    sendResponse({ success: true });
   }
+  return true;
 });
+
+console.log("Content script loaded and ready to capture audio");
