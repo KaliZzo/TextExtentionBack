@@ -1,4 +1,4 @@
-let whisperAPIKey = "";
+let whisperAPIKey = "secret";
 let isRecording = false;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
